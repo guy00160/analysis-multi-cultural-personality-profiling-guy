@@ -1,0 +1,1938 @@
+---
+title: "Personality Profiles Project"
+author: "Guy Hen"
+date: "2024-04-01"
+output:   
+  html_document: 
+    toc: true
+    toc_float: true
+
+  
+---
+
+# Introduction
+
+Let's do a quick orientation. We finished the research stage of the study, and now we are going to use statistical analyses to answer our research question:\
+What is the right classification (culture-wise) for the Israeli personality profile?\
+We hypothesize that the western world personality profiles would resemble the Israeli population the most.
+
+
+**Important conclusions from the research stage:**
+
+1.  Our personality profiles will be built from the following personality traits:
+
+-   [The Big Five]{style="text-decoration:underline"}: Openness To Experience, Conscientiousness, Extraversion, Agreeableness, Neuroticism.
+-   [The Dark Triad]{style="text-decoration:underline"}: Narcissism, Machiavellianism, Psychopathy.
+-   Self-Esteem (trait-like).
+
+2.  We will use the following cultures for our analyses:
+
+-   [The Western World]{style="text-decoration:underline"}: USA, United Kingdom, Australia.
+-   [The Arab World]{style="text-decoration:underline"}: The United Arab Emirates, The Fertile Crescent (Jordan, Lebanon, Iraq, Syria, Egypt).
+-   [The Far Eastern World]{style="text-decoration:underline"}: China, India.
+
+**Technical information for clarity:**
+
+1.  All of the data will be taken from [OpenPsychometrics](https://openpsychometrics.org/_rawdata/).
+
+2.  All countries data are not self-report based, it is inferred from technical information using MaxMind GeoLite.\
+
+3.  The data in those datasets only entered the dataset if the user confirmed his answers were accurate and suitable for research.
+
+4.  We will use the following data sets:
+
+-   Big Five Factor Markers (IPIP-FFM-data-8Nov2018.zip).
+-   Machiavellianism Test (MACH_data).
+-   Rosenberg Self-Esteem Scale (RSE).
+-   Short Dark Triad (SD3).
+
+5.  All the tests use a likert-scale to measure their respective traits. Rosenberg uses a 1-4 scale, in which 1= Strongly disagree, 2=Disagree,3=Agree, 4=Strongly agree.\
+    All the other tests use a 1-5 scale, in which 1=Disagree, 2=Slightly disagree, 3=Neutral, 4=Slightly agree, 5=Agree (more info about likert-scales in the appendix of the word report).
+
+We will start off with preparing our data for analysis. We will do it one data set at a time to maintain organization.
+
+# Part 1 : Pre-Processing The Raw Data
+
+### Rosenberg Self-Esteem Scale
+
+**importing + basic acquaintance with the data and tidying**
+
+```{r message=FALSE}
+
+library(tidyverse) # loading a tidyverse collection of R packages, intended for data science
+library(readxl) # loading a package intended for loading data from excel to R
+
+```
+
+Note: When we downloaded the data sets from [OpenPsychometrics](https://openpsychometrics.org/_rawdata/), the default csv formats did not present the data correctly. This is why we converted the CSV to Excel files, which fixed the problem. hence, we loaded a package which can easily read excel files.
+
+```{r}
+RAW_RSE <- read_excel("RSE.xlsx")
+names(RAW_RSE) # show all the variables in the data table
+glimpse(RAW_RSE) # show value examples for all variables
+head(RAW_RSE) # show examples of records
+
+```
+
+Before we do anything else, we should get rid of the columns that will not be a part of our project.
+
+```{r}
+
+Tidy_RSE <- RAW_RSE %>% select(-c(gender,age,source)) # source - how the user came to the page, not relevant for us
+head(Tidy_RSE)
+```
+
+Note: We could use the values in those columns to track down questionable records (like age= 150) and remove them, but the source of our data (OpenPsychometrics) explicitly states that all of the data is already verified, plus even if someone did not want to give real demographic data, it does not mean he did not answer the questionnaire seriously.\
+Quote from the website:\
+"Users were informed at the beginning of the test that their answers would be used for research and were asked to confirm that their answers were accurate and suitable for research upon completion (those that did not have been removed from these datasets)".
+
+**Calculating a self-esteem score**
+
+First, we will remove records in which the subject did not answer all of the questions. According to the data book, 0= no answer. Also, all answers should be in 1-4 range.
+
+```{r}
+
+Tidy_RSE <- Tidy_RSE %>% filter(if_all(matches("^Q.*"), ~ . >0 & . <5)) #We filter all the records in which all of the question columns have values bigger than 0 (also verify that no value is bigger than 4)
+count(Tidy_RSE)
+```
+
+We removed `r count(RAW_RSE) - count(Tidy_RSE)` records.
+
+Now we will calculate the RSE (check report for more info):
+
+```{r}
+
+Tidy_RSE <- Tidy_RSE %>% mutate(RSE_SCORE = Q1+Q2+(5-Q3)+Q4+(5-Q5)+Q6+Q7+(5-Q8)+(5-Q9)+(5-Q10))
+
+head(Tidy_RSE)
+
+Tidy_RSE <- Tidy_RSE %>% mutate(RSE_SCORE=RSE_SCORE-10) # changing 10-40 scale to 0-30 scale, easier to understand when the scale begins from 0
+
+Tidy_RSE <- Tidy_RSE %>% mutate(ID= row_number()) # add unique identifier
+
+Tidy_RSE <- Tidy_RSE %>% select(ID, country,RSE_SCORE) # we do not need the questions anymore
+head(Tidy_RSE)
+
+```
+
+**Tidying + Visualizations + Looking for Outliers**
+
+Looking at the data, our countries are represented in ISO 3166 country codes, with some augmentations (which are not relevant for us).\
+The next step would be using the full country names for the countries we chose for the research - as ISO codes are not comfortable to work with.
+
+```{r}
+Tidy_RSE <- Tidy_RSE %>% mutate(country = ifelse(country == "US","USA",ifelse(country == "GB", "United Kingdom", ifelse(country == "AU", "Australia", ifelse(country == "IL","Israel", ifelse(country == "AE", "United Arab Emirates",ifelse(country == "CN", "China",ifelse(country == "IN", "India",country))))))))
+
+```
+
+Now we will merge the Fertile Crescent countries and rename them as "Fertile Crescent".
+
+```{r}
+Fertile_Crescent_Countries <- list("JO","LB","IQ","SY","EG") # all fertile crescent countries
+
+Tidy_RSE <- Tidy_RSE %>% mutate(country= ifelse(country %in% Fertile_Crescent_Countries,"Fertile Crescent",country)) 
+
+```
+
+Let's filter only the relevant countries, then try to understand better the distribution of RSE in those countries and then detect outliers:
+
+```{r}
+Filtered_Tidy_RSE <- Tidy_RSE %>% filter(str_length(country)>2)
+
+theme_set(theme_gray()) #style of graphs
+theme_update(plot.title = element_text(hjust = 0.5)) # align graph titles to the center
+
+ggplot(Filtered_Tidy_RSE %>% filter(country=="Israel"), aes(x=RSE_SCORE)) + geom_density() + ggtitle("RSE In Israel")# let's look at Israel's RSE distribution
+
+```
+
+What can we take from this distribution of Israel?
+
+It's interesting - it resembles a normal distribution, but the right tail is inflated. In a normal distribution you would expect symmetrical low density in both tails - the more extreme results are rare. In Israel, it does seem like an extremely low self esteem is rare, but it is not symmetrical - it is more likely to have an extremely high self esteem in Israel than an extremely low one. Still, it is important to note that middle RSE scores are the most common.
+
+Let's get a distribution impression from each culture in our research: We will check USA, The Fertile Crescent and India.
+
+```{r}
+
+
+ggplot(Filtered_Tidy_RSE %>% filter(country=="USA"), aes(x=RSE_SCORE)) + geom_density() + ggtitle("RSE In USA")
+
+```
+
+The USA looks a lot like Israel.
+
+```{r}
+
+ggplot(Filtered_Tidy_RSE %>% filter(country=="Fertile Crescent"), aes(x=RSE_SCORE)) + geom_density() + ggtitle("RSE In The Fertile Crescent")
+
+```
+
+The Fertile Crescent looks very interesting for a number of reasons:\
+1. the right tail looks low in density (like in a normal distribution).  
+2. most of the distribution seems be located on the higher end of self esteem.  
+3. there is an inflation in the lower end of self esteem (but not in the extreme low level).
+
+```{r}
+
+ggplot(Filtered_Tidy_RSE %>% filter(country=="India"), aes(x=RSE_SCORE)) + geom_density() + ggtitle("RSE In India")
+
+```
+
+India seems to resemble Israel too, but is displaying higher self esteem in general.
+
+Now we will try to understand the data better using boxplots - it will also help locate outliers:
+
+```{r}
+
+ggplot(Filtered_Tidy_RSE,aes(x=country,y=RSE_SCORE,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+```
+
+There is a lot you can deduce from this boxplot, for example:  
+1. The United Kingdom has the lowest self esteem median.  
+2.  The United Arab Emirates and the Fertile Crescent, which means, the arab culture in general, shows the highest self esteem median.3.  India and The Fertile Crescent contain outliers.
+
+We should not just take out all of the outliers without giving it any thought. Let's try to understand if it makes sense to remove those outliers.
+
+General note: having outliers is not so bad in our research, because our dependent variables all have upper and lower bounds - which means we are resistant to the threat of few super-extreme records having big influences on our means. Still, we will try to deal with outliers case by case.
+
+India:
+
+The outlier seems really close to the whisker. Let's calculate the lower whisker and then see how far the outliers are compared to it.
+
+```{r}
+
+quartiles <- quantile((Filtered_Tidy_RSE %>% filter(country=="India"))$RSE_SCORE, c(0.25, 0.75))
+Q1 <- quartiles[1]
+Q3 <- quartiles[2]
+IQR <- Q3 - Q1
+
+# Calculate lower whiskers
+
+lower_whisker <- Q1 - 1.5 * IQR
+cat("Lower whisker:", lower_whisker, "\n")
+
+```
+
+Which means the outliers are extremely close to the whisker, so those outliers are all RSE=0 and they can barely be considered outliers - so we will not remove them.
+
+Fertile Crescent:
+
+```{r}
+
+quartiles <- quantile((Filtered_Tidy_RSE %>% filter(country=="Fertile Crescent"))$RSE_SCORE, c(0.25, 0.75))
+Q1 <- quartiles[1]
+Q3 <- quartiles[2]
+IQR <- Q3 - Q1
+
+# Calculate lower whiskers
+
+lower_whisker <- Q1 - 1.5 * IQR
+cat("Lower whisker:", lower_whisker, "\n")
+
+boxplot.stats((Filtered_Tidy_RSE %>% filter(country=="Fertile Crescent"))$RSE_SCORE)$out #spotting the outliers
+
+Filtered_Tidy_RSE %>% filter(country=="Fertile Crescent") %>% count() # records from Fertile Crescent
+
+```
+
+RSE=4 can be barely considered an outier. We will take out the record with RSE=2 just to be sure because we have enough records. Nevertheless, removing the outlier or not should be negligible in this situation.
+
+```{r}
+
+count(Filtered_Tidy_RSE)
+
+Filtered_Tidy_RSE <- Filtered_Tidy_RSE %>% filter(!(country=="Fertile Crescent" & RSE_SCORE==2))
+
+count(Filtered_Tidy_RSE) # make sure we only removed 1 record
+
+
+```
+
+**Checking the assumptions for ANOVA**
+
+We want to use ANOVA as the statistical test for the research. Before we continue to the next questionnaire to pre-process, we want to check if ANOVA assumptions hold on our data.\
+There are 2 main assumptions to look at:
+
+1.  Normality: the data for each group (country) is drawn from a normally distributed population.\
+2.  Homogeneity of variance: The variance of the data within each group (each country) is equal.
+
+Normality:
+
+```{r}
+
+Filtered_Tidy_RSE %>% count(country) 
+
+```
+
+All of our samples are large enough to assume that the sampling distributions are close enough to normal(\>=25)(based on Central Limit Theorem), which means the normality assumption is less critical and that the ANOVA test is robust to a violation of this assumption. Even so, we saw earlier that our distributions share similarities with the normal distribution.
+
+Homogeneity of variance: (check report for more info)
+
+```{r message=FALSE}
+
+library(car) # A function for levene's test for equality of variances is in this package 
+```
+
+```{r warning=FALSE}
+leveneTest(RSE_SCORE ~ country, Filtered_Tidy_RSE)
+```
+
+The P-value is significant, which means the variances are not equal. This is a violation of ANOVA's assumptions - we will decide what to do later on. For now, we will save the standard deviations of the different countries.
+
+```{r}
+
+SD_Countries_RSE <- Filtered_Tidy_RSE %>% group_by(country) %>% summarize(std_dev = sd(RSE_SCORE)) # calculate standard deviation for all countries
+
+SD_Countries_RSE
+
+```
+
+At first glance, The difference between the different standard deviations does not seem so major...
+
+### Machiavellism Test
+
+**importing + basic acquaintance with the data and tidying**
+
+```{r}
+RAW_Mach <- read_excel("MACH.xlsx")
+names(RAW_Mach) # show all the variables in the data table
+```
+
+We have many columns in this dataset. Before we continue, we should get rid of columns we do not need as understanding the dataset would be really uncomfortable like this. We will use the codebook that came with the dataset to understand the meaning of the columns:
+
+1.  Statements - There are 20 statements in the MACH test that are meant to measure Machiavellianism. Users responded to each statement on a five point scale: 1=Disagree, 2=Slightly disagree, 3=Neutral, 4=Slightly agree, 5=Agree.\
+    Every answer is denoted QiA, where 1\<=i\<=20 and "A" denotes "Answer".\
+    Those are the core for our analysis, and we need this data in order to compute a MACH score.\
+    In addition to the answers, every statement has a tracking of the time it took for the user to answer in milliseconds (QiE), and the position of the statement in that specific user's questionnaire (QiI) (as the order of the statements was randomized for every user).\
+2.  Optional short big five survey - TIPI1,TIPI2, etc columns. We have no use for those - we already have a big 5 questionnaire and it is better for the purpose of measuring the big 5 than this survey (which only has 10 questions to measure all of the big 5).
+3.  Validity check - VCL 1-16. Those columns are used to detect users who did not answer the additional survey seriously.
+4.  demographics - educations, urban, gender, engnat, age, hand, religion, orientation, race, voted, married, familysize, major.
+5.  server calculated values - country, screenw (width of user device), screenh (height of user device).
+6.  time spent in various sections - introelapse, testelapse, surveyelapse.
+
+We only need the Mach questions and the country for our research, but before we take out the other columns, we should use them to detect users with questionable records. The users verified the credibility of their answers at the end of the test, but we will be on the safe side and not only take their word for it.
+
+We have several means to do that - VCL, testelapse, and QiE. VCL tests the validity of the extra survey, which means even if the user failed it, it does not mean the initial (and most important) test is also not valid. Testelapse is a reasonable choice, but even if the time for finishing the test makes sense, it does not necessarily mean that all of the questions were answered seriously.\
+For example: A user could finish the entire test in 10 minutes, but answer question 1 and 2 in 2 seconds, which means those answers are not viable.
+
+If so, we will take the harder route of choosing the QiE. The best way to filter invalid answers would be to look at each statement individually and use a different threshold that depends on the specific statement's length and complexity (possibly even assessing the distributions for every statement). We will not do that as we think this approach would be an overkill for a dataset which should already be verified. Instead, we will take out all the records which contain an answer that was given in less than 1 second (1000 milliseconds). We will use the reasonable assumption that a user can not answer any question seriously in under one second. If a user had at least 1 invalid answer, that means that the entire Mach score would be invalid and that is why we take him out (there is enough data to be strict about it).
+
+```{r}
+RAW_Mach %>% count() #before filtering
+Tidy_Mach <- RAW_Mach %>% filter(!if_any(matches("^Q.*E$"), ~ . <1000)) #This one can be tricky to understand - if_any is a function which selects multiple columns for a condition, if any of the selected columns returns true then the record passes the filter. I selected all the columns that start with Q and end with E - all QiE. Then we have all of the records that we want to take out of the data (invalid), that's why we need to use "!" at the start of the filter, so we can get the complementary data, which is valid.
+Tidy_Mach %>% count() # after filtering
+
+```
+
+Now we will take out the extra columns:
+
+```{r}
+Tidy_Mach <- Tidy_Mach %>% select(c(matches("^Q.*A$"),"country")) # Taking only the answers and the country column
+
+glimpse(Tidy_Mach) # show value examples for all variables
+head(Tidy_Mach) # show examples of records
+
+```
+
+Making sure all of the question values are between 1-5 as they should:
+
+```{r}
+Tidy_Mach %>% filter(if_any(matches("^Q.*A$"), ~ . >5 | . <1)) #sanity check that there is no invalid values
+
+```
+
+**Calculating a Mach Score**
+
+Now we will calculate the Mach Score (check report for more info):
+
+```{r}
+
+Tidy_Mach <- Tidy_Mach %>% mutate(Mach_Score = Q1A + Q2A + (6-Q3A) + (6-Q4A) + Q5A + (6-Q6A) + (6-Q7A) + Q8A + (6-Q9A) + (6-Q10A) + (6-Q11A) + Q12A + Q13A + (6-Q14A) + Q15A + (6-Q16A) + (6-Q17A) + Q18A + Q19A + Q20A) 
+
+Tidy_Mach <- Tidy_Mach %>% mutate(ID= row_number()) # add unique identifier
+
+Tidy_Mach <- Tidy_Mach %>% select(ID, country,Mach_Score) # we do not need the questions anymore
+
+head(Tidy_Mach)
+
+```
+
+**Tidying + Visualizations + Looking for Outliers**
+
+We will do the same steps we did in RSE:
+
+```{r}
+Tidy_Mach <- Tidy_Mach %>% mutate(country = ifelse(country == "US","USA",ifelse(country == "GB", "United Kingdom", ifelse(country == "AU", "Australia", ifelse(country == "IL","Israel", ifelse(country == "AE", "United Arab Emirates",ifelse(country == "CN", "China",ifelse(country == "IN", "India",country))))))))
+
+Tidy_Mach <- Tidy_Mach %>% mutate(country= ifelse(country %in% Fertile_Crescent_Countries,"Fertile Crescent",country)) 
+
+
+Filtered_Tidy_Mach <- Tidy_Mach %>% filter(str_length(country)>2)
+
+Filtered_Tidy_Mach %>% count(country) # Let's see how much records each country has
+```
+
+It seems we failed to filter "NONE", so we will filter it now and then show visualizations:
+
+```{r}
+
+Filtered_Tidy_Mach <- Filtered_Tidy_Mach %>% filter(!country=="NONE")
+
+ggplot(Filtered_Tidy_Mach %>% filter(country=="Israel"), aes(x=Mach_Score)) + geom_density() + ggtitle("Mach Score In Israel")# let's look at Israel's Mach Score distribution
+```
+
+In RSE we showed several distributions separately, this time let's merge them into a single graph to shorten the process. We will take one country from each culture, the same way we did in RSE.
+
+```{r}
+
+ggplot(Filtered_Tidy_Mach %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = Mach_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+```
+
+Without observing it too deeply, it is interesting to note that the fertile crescent countries have the highest density at the maximum of the Mach Scale.
+
+Let's try using boxplots again. It will help understand the data better and also locate outliers.
+
+```{r}
+
+ggplot(Filtered_Tidy_Mach,aes(x=country,y=Mach_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+```
+
+It is worth noting that once again The fertile crescent is prominent. Its median is the highest, and so its 75% percentile.
+
+Let's check the outliers for India and China:
+
+```{r}
+
+Filtered_Tidy_Mach %>% count(country=="China") # total data records for China
+
+boxplot.stats((Filtered_Tidy_Mach %>% filter(country=="China"))$Mach_Score)$out
+
+# The scores of the records which are outliers, only 3 records are outliers
+
+Filtered_Tidy_Mach %>% count(country=="India") # total data records for India
+
+boxplot.stats((Filtered_Tidy_Mach %>% filter(country=="India"))$Mach_Score)$out
+
+```
+
+We can remove those outliers because there is a very large sample and very few outliers - it should not hurt our analysis.
+
+```{r}
+
+
+India_Mach_Outliers <- 
+boxplot.stats((Filtered_Tidy_Mach %>% filter(country=="India"))$Mach_Score)$out
+
+Filtered_Tidy_Mach <- Filtered_Tidy_Mach %>% filter(!(Mach_Score %in% India_Mach_Outliers & country=="India"))
+
+China_Mach_Outliers <- 
+boxplot.stats((Filtered_Tidy_Mach %>% filter(country=="China"))$Mach_Score)$out
+
+Filtered_Tidy_Mach <- Filtered_Tidy_Mach %>% filter(!(Mach_Score %in% China_Mach_Outliers & country=="China"))
+                                
+
+Filtered_Tidy_Mach %>% count(country) # sanity check
+                                
+                                
+```
+
+**Checking the assumptions for ANOVA**
+
+1.  Normality - in the sanity check above we can see all of the samples are big enough (\>=25).\
+2.  Homogeneity of variance:
+
+```{r warning=FALSE}
+leveneTest(Mach_Score ~ country, Filtered_Tidy_Mach)
+```
+
+Again, we can not assume Homogeneity of Variance.\
+Once again, we will save the standard deviations:
+
+```{r}
+
+SD_Countries_Mach <- Filtered_Tidy_Mach %>% group_by(country) %>% summarize(std_dev = sd(Mach_Score)) # calculate standard deviation for all countries
+
+SD_Countries_Mach
+
+```
+
+### Short Dark Triad (without Machiavellism)
+
+**importing + basic acquaintance with the data and tidying**
+
+```{r}
+RAW_SD3 <- read_excel("SD3.xlsx")
+names(RAW_SD3) # show all the variables in the data table
+glimpse(RAW_SD3) # impression of the data
+```
+
+This data is a lot "friendlier" than the last one. We have 9 statements for each dark triad trait - we only need narcissism and psychopathy (We explained in the research stage why we will not use the extra Machiavellism data).\
+"Source" tells us how the user got into the test's page - not relevant for us.
+
+Let's take out the extra columns:
+
+```{r}
+
+Tidy_SD3 <- RAW_SD3 %>% select(c(matches("^N.*"),matches("^P.*"),"country")) # Taking Psychopathy and Narcissism statements + country data
+
+glimpse(Tidy_SD3)
+head(Tidy_SD3)
+count(Tidy_SD3)
+
+#get a feel for the data
+```
+
+The statements should have responses only in range 1-5, let's verify it:
+
+```{r}
+Tidy_SD3 %>% filter(if_any(c(matches("^N.*"),matches("^P.*")), ~ . >5 | . <1)) #checking the validity of data
+
+Tidy_SD3 %>% filter(if_any(c(matches("^N.*"),matches("^P.*")), ~ . >5 | . <1)) %>% count() # should be 0
+```
+
+It seems we need to get rid of those records - they have at least one "0" answer which means the user did not answer the question..
+
+```{r}
+Tidy_SD3 <- Tidy_SD3 %>% filter(if_all(c(matches("^N.*"),matches("^P.*")), ~ . >0 & . <6)) 
+Tidy_SD3 %>% count() # sanity check that the numbers add up
+```
+
+**Calculating Psychopathy and Narcissism Scores**
+
+Now we will calculate Psychopathy and Narcissism Scores (check report for more info):
+
+```{r}
+
+Tidy_SD3 <- Tidy_SD3 %>% mutate(
+Narcissism_Score = (N1 + (6-N2) + N3 + N4 + N5 + (6-N6) + N7 + (6-N8) + N9)/9, 
+Psychopathy_Score = (P1 + (6-P2) + P3 + P4 + P5 + P6 + (6-P7) + P8 + P9)/9)
+
+Tidy_SD3 <- Tidy_SD3 %>% mutate(ID= row_number()) # add unique identifier
+
+Tidy_SD3 <- Tidy_SD3 %>% select(ID, country,Narcissism_Score,Psychopathy_Score) # we do not need the questions anymore
+
+head(Tidy_SD3)
+
+```
+
+**Tidying + Visualizations + Looking for Outliers**
+
+```{r}
+Tidy_SD3 <- Tidy_SD3 %>% mutate(country = ifelse(country == "US","USA",ifelse(country == "GB", "United Kingdom", ifelse(country == "AU", "Australia", ifelse(country == "IL","Israel", ifelse(country == "AE", "United Arab Emirates",ifelse(country == "CN", "China",ifelse(country == "IN", "India",country))))))))
+
+Tidy_SD3 <- Tidy_SD3 %>% mutate(country= ifelse(country %in% Fertile_Crescent_Countries,"Fertile Crescent",country)) 
+
+Filtered_Tidy_SD3 <- Tidy_SD3 %>% filter(str_length(country)>2)
+
+Filtered_Tidy_SD3 %>% count(country) # Let's see how much records each country has
+```
+
+This dataset is the smallest we had, it means we should be careful about removing outliers - at least for the smaller countries.
+
+Let's start with Narcissism:
+
+```{r}
+
+ggplot(Filtered_Tidy_SD3 %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = Narcissism_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+```
+
+Again, It is interesting to note that the fertile crescent is showing the highest density at max narcissism. Israel's distribution looks really close to normality.
+
+Let's watch the data using boxplots:
+
+```{r}
+
+ggplot(Filtered_Tidy_SD3,aes(x=country,y=Narcissism_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+```
+
+India has outliers, but it seems only the lower ones are really problematic, let's check:
+
+```{r}
+
+boxplot.stats((Filtered_Tidy_SD3 %>% filter(country=="India"))$Narcissism_Score)$out
+
+quartiles <- quantile((Filtered_Tidy_SD3 %>% filter(country=="India"))$Narcissism_Score, c(0.25, 0.75))
+
+Q1 <- quartiles[1]
+Q3 <- quartiles[2]
+IQR <- Q3 - Q1
+
+lower_whisker <- Q1 - 1.5 * IQR
+higher_whisker <- Q3 + 1.5 * IQR
+
+lower_whisker
+higher_whisker
+
+```
+
+The record with narcissism score "1" is the only record which seems like a true outlier, we will remove it. It is worth noting that in this dataset, in contrast to the previous ones, removing a record completely means losing more information - in this case the psychopathy score of the user. We decided to remove it anyways, because the record is such an extreme outlier, that there is a possibility the user did not answer the questionnare seriously. Losing one observation will have minimum impact on the Psychopathy analysis, so it should be fine.
+
+```{r}
+Filtered_Tidy_SD3 %>% count() 
+
+Filtered_Tidy_SD3 <- Filtered_Tidy_SD3 %>% filter(!(country=="India" & Narcissism_Score==1)) #remove
+
+Filtered_Tidy_SD3 %>% count() # sanity check
+
+```
+
+Now we move to psychopathy:
+
+```{r}
+ggplot(Filtered_Tidy_SD3 %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = Psychopathy_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+
+```
+
+Yet again, the arab world stands out..
+
+```{r}
+
+ggplot(Filtered_Tidy_SD3,aes(x=country,y=Psychopathy_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+
+```
+
+And again.
+
+The united arab emirates have low number of records, so we will not deal with those outliers (which does not seem so drastic anyways). China's outlier is barely an outlier. India's is a toss up - we decided to leave it be.
+
+**Checking the assumptions for ANOVA**
+
+1.  Normality - most of the samples are big enough (\>=25), with the exception of The Fertile Crescent (N=24). Because it is only 1 record short, we think it is good enough.
+
+2.  Homogeneity of variance:
+
+Narcissism:
+
+```{r warning=FALSE}
+leveneTest(Narcissism_Score ~ country, Filtered_Tidy_SD3)
+```
+
+Psychopathy:
+
+```{r warning=FALSE}
+leveneTest(Psychopathy_Score ~ country, Filtered_Tidy_SD3)
+```
+
+They are both significant, which is not surprising at this point. Once again, we will save the standard deviations.
+
+```{r}
+
+SD_Countries_Narcissism <- Filtered_Tidy_SD3 %>% group_by(country) %>% summarize(std_dev = sd(Narcissism_Score)) # calculate standard deviation for all countries
+
+SD_Countries_Narcissism
+
+SD_Countries_Psychopathy <- Filtered_Tidy_SD3 %>% group_by(country) %>% summarize(std_dev = sd(Psychopathy_Score)) # calculate standard deviation for all countries
+
+SD_Countries_Psychopathy
+```
+
+### Big Five Factor Markers
+
+**importing + basic acquaintance with the data and tidying**
+
+This dataset is huge! both in columns and record number.. (over 1M records)\
+when we tried to import the file to R, the running process took too much time. We managed to fix this problem when we reverted the excel format back to csv, so we will import the data via csv this time.
+
+```{r}
+RAW_Big5 <- read.csv("Big5_CSV.csv")
+names(RAW_Big5) # show all the variables in the data table
+glimpse(RAW_Big5) # observe some values
+
+```
+
+We should get rid of extra columns first, we used the codebook to understand the different columns:
+
+1.  Statements - There are 50 statements, 10 for each trait of the big 5.\
+
+<!-- -->
+
+a.  EXTi - Extraversion, where 1\<=i\<=10 and notes a statement number.
+b.  ESTi - Emotional Stability (the reverse measurement of Neuroticism), where 1\<=i\<=10 and notes a statement number.\
+c.  AGRi - Agreeableness, where 1\<=i\<=10 and notes a statement number.
+d.  CSNi - Conscientiousness, where 1\<=i\<=10 and notes a statement number.
+e.  OPNi - Openess (to experience), where 1\<=i\<=10 and notes a statement number.
+
+-   In addition to the answers themselves, there is also a measurement of the time spent on each question in milliseconds - these are the variables ending with \_E.
+
+2.  Technical information: screenw (screen width), screenh (screenh), dateload (the timestamp when the survey was started), introelapse (time in seconds spent on the intro page), testelapse (time in seconds spent on the survey questions), endelapse (time on the final page, where the user was asked if they answered accurately), IPC (number of records from the same user IP), country (was not asked, determined by technical info), lat_appx_lots_of_err (latitude of user, not accurate), long_appx_lots_of_err (longtitude of user, not accurate).
+
+Obviously, we need the question answers and the country data. Let's try to use more technical data to filter unwanted records. First, we should filter all the records in which IPC \> 1 - we don't want to take multiple results from the same user. It is important to note that we realize the same IP does not necessarily mean the same person did the test several times (it could be his family/friends/shared networks) but we have enough data to not risk it.
+
+```{r}
+RAW_Big5 %>% count() #before filtering
+
+Tidy_Big5 <- RAW_Big5 %>% filter(IPC==1)
+
+Tidy_Big5 %>% count() #after filtering
+
+```
+
+Now we want to validate the test responses' accuracy. In the mach test, we verified that all of our users invested at least 1 second at each question. In this case, because the test has 50 questions, we thought that this criteria might not be as appropriate - we do not want users that answered 49 questions seriously to get out of the analysis (they could also misclick in one question).\
+Instead, we thought that this time we can look at the overall time it took for the user to finish the test to estimate seriousness. OpenPsychometrics states that most users finish this test in 3-8 minutes. If a user finishes the test in 3 minutes, it means he spent 3.6 seconds on average for a question (which is still really quick). Taking this into account, we decided that in high probability, users that finished the test in less than 3 minutes have not taken the test seriously - and we will filter them.
+
+```{r}
+
+Tidy_Big5 <- Tidy_Big5 %>% filter(testelapse>=180)
+
+Tidy_Big5 %>% count() #after filtering
+
+```
+
+Now we will keep only the necessary columns for us:
+
+```{r}
+
+Tidy_Big5 <- Tidy_Big5 %>% select(c(matches("\\d"),-matches("_"),"country"))
+
+#Take all the columns with a number (statement columns), exclude those that have "_" (time measurement) and add "country" column
+
+glimpse(Tidy_Big5) # check tidied data
+
+```
+
+Last step of the tidying is checking that all of the answers are in the appropriate range (1-5):
+
+```{r}
+head(Tidy_Big5 %>% filter(if_any(matches("\\d"), ~ . >5 | . <1))) #checking the validity of data
+
+Tidy_Big5 %>% filter(if_any(matches("\\d"), ~ . >5 | . <1)) %>% count() # should be 0
+```
+
+Sadly, many records have invalid answers.. we will remove them:
+
+```{r}
+
+Tidy_Big5 <- Tidy_Big5 %>% filter(if_all(matches("\\d"), ~ . >0 & . <6))
+Tidy_Big5 %>% count() # sanity check that the numbers add up
+
+```
+
+We had to go down from `r count(RAW_Big5)` to `r count(Tidy_Big5)`.
+
+**Calculating Big 5 Scores**
+
+Now we will calculate Big 5 Scores (check report for more info):
+
+```{r}
+
+Tidy_Big5 <- Tidy_Big5 %>% mutate(
+Extraversion_Score = EXT1 + EXT3 + EXT5 + EXT7 + EXT9 + (6-EXT2) + (6-EXT4) + (6-EXT6) + (6-EXT8) + (6-EXT10),
+
+EmotionalStability_Score = EST2 + EST4 + (6-EST1) + (6-EST3) + (6-EST5) + (6-EST6) + (6-EST7) + (6-EST8) + (6-EST9) + (6-EST10),
+
+Agreeableness_Score = AGR2 + AGR4 + AGR6 + AGR8 + AGR9 + AGR10 + (6-AGR1) + (6-AGR3) + (6-AGR5) + (6-AGR7),
+
+Conscientiousness_Score = CSN1 + CSN3 + CSN5 + CSN7 + CSN9 + CSN10 + (6-CSN2) + (6-CSN4) + (6-CSN6) + (6-CSN8),
+
+Openess_Score = OPN1 + OPN3 + OPN5 + OPN7 + OPN8 + OPN9 + OPN10 + (6-OPN2) + (6-OPN4) + (6-OPN6))
+
+Tidy_Big5 <- Tidy_Big5 %>% mutate(ID= row_number()) # add unique identifier
+
+Tidy_Big5 <- Tidy_Big5 %>% select(ID, country, Extraversion_Score, EmotionalStability_Score, Agreeableness_Score, Conscientiousness_Score, Openess_Score  ) # we do not need the questions anymore
+
+head(Tidy_Big5)
+
+```
+
+**Tidying + Visualizations + Looking for Outliers**
+
+This time Filtered_Tidy_Big5 will be created earlier, because we do not want to overwrite the Fertile Crescent countries in Tidy_Big5, we may want to use them in exploratory tests at the end.
+
+```{r}
+Tidy_Big5 <- Tidy_Big5 %>% mutate(country = ifelse(country == "US","USA",ifelse(country == "GB", "United Kingdom", ifelse(country == "AU", "Australia", ifelse(country == "IL","Israel", ifelse(country == "AE", "United Arab Emirates",ifelse(country == "CN", "China",ifelse(country == "IN", "India",country))))))))
+
+Filtered_Tidy_Big5 <- Tidy_Big5 %>% mutate(country= ifelse(country %in% Fertile_Crescent_Countries,"Fertile Crescent",country)) 
+
+Filtered_Tidy_Big5 <- Filtered_Tidy_Big5 %>% filter(str_length(country)>2)
+
+Filtered_Tidy_Big5 %>% count(country) # Let's see how much records each country has
+```
+
+So many records.. especially for the west. Let's get rid of NONE and then start show visualizations.
+
+we will start with Extraversion.
+
+```{r}
+
+Filtered_Tidy_Big5 <- Filtered_Tidy_Big5 %>% filter(!country=="NONE")
+
+ggplot(Filtered_Tidy_Big5 %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = Extraversion_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+```
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5,aes(x=country,y=Extraversion_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+```
+
+The whiskers cover the whole scale so there is no option for outliers. It is interesting to see how similar all those different countries are. The Fertile Crescent once again differentiates itself - it seems people are more introverted there.
+
+Emotional Stability:
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5 %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = EmotionalStability_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+```
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5,aes(x=country,y=EmotionalStability_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+```
+
+The Fertile Crescent shows the lowest emotional stability. It seems there are some outliers (barely so), if there are alot of records there, we will consider removing those values. Let's check:
+
+```{r}
+
+boxplot.stats((Filtered_Tidy_Big5 %>% filter(country=="Fertile Crescent"))$EmotionalStability_Score)$out
+
+```
+
+Only 3 outliers, and they are close to the whiskers.. they barely effect the statistics anyways because we have 1322 Fertile Crescent records. We will leave those results be.
+
+Agreeableness:
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5 %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = Agreeableness_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+```
+
+All cultures seem to gravitate towards the higher scores of agreeableness, it makes sense as it is considered a good trait to have - most people would have an interest to view themselves as high in that trait. India especially shows high density at high levels of agreeableness, which also makes sense because of their culture.
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5,aes(x=country,y=Agreeableness_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+```
+
+The outliers look like a mess, but it makes sense because most of the distributions were "stuck" at the high levels of agreeableness (low variance), which means the difference between the 0.25 and 0.75 percentiles were smaller (because most of the distribution utilized only the higher values). Because of big density at the higher values and smaller whiskers, it follows that we will have many lower tail "outliers". Still, it does not look like they are "true" outiers - as all the values have representations in a consistent manner. This is the weakness of using boxplots when the distributions are not normal enough, and because of this we will not treat all of those values as outliers - only the lowest china datapoints (as they truly seem out of place).
+
+```{r}
+
+boxplot.stats((Filtered_Tidy_Big5 %>% filter(country=="China"))$Agreeableness_Score)$out
+
+```
+
+Let's check this agreeableness=10 record, it may be an overall problematic record (user who did not answer seriously):
+
+```{r}
+Filtered_Tidy_Big5 %>% filter (country=="China" & Agreeableness_Score==10)
+```
+
+There is no obvious problem with this record, but we have enough records to just get rid of the whole record just to be sure.
+
+```{r}
+
+Filtered_Tidy_Big5 <- Filtered_Tidy_Big5 %>% filter (!(country=="China" & Agreeableness_Score==10))
+
+```
+
+Conscientiousness:
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5 %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = Conscientiousness_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+```
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5,aes(x=country,y=Conscientiousness_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+
+```
+
+Again, we will only look at China for outliers:
+
+```{r}
+
+boxplot.stats((Filtered_Tidy_Big5 %>% filter(country=="China"))$Conscientiousness_Score)$out
+
+```
+
+Let's check this Conscientiousness=10 record, it may be an overall problematic record (user who did not answer seriously):
+
+```{r}
+Filtered_Tidy_Big5 %>% filter (country=="China" & Conscientiousness_Score==10)
+```
+
+Again - There is no obvious problem with this record, but we have enough records to just get rid of the whole record just to be sure.
+
+```{r}
+Filtered_Tidy_Big5 <- Filtered_Tidy_Big5 %>% filter (!(country=="China" & Conscientiousness_Score==10))
+
+```
+
+Openess:
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5 %>% filter
+      (country %in% c("Israel","USA","Fertile Crescent","India")), 
+     aes(x = Openess_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "USA" = "red",
+                                  "Fertile Crescent" = "green",
+                                  "India" = "purple"))
+```
+
+```{r}
+
+ggplot(Filtered_Tidy_Big5,aes(x=country,y=Openess_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+
+
+```
+
+It is interesting to see Israel finally differentiated from the other countries - It seems we have the highest scores for the openess for experience trait. Again, this trait is considered desirable in general, and all of the countries are skewed to the higher values of this trait. China looks like the lowest for this trait.\
+In terms of outliers - we will check the lowest fertile crescent outliers, as they really seem out of place.
+
+```{r}
+
+boxplot.stats((Filtered_Tidy_Big5 %>% filter(country=="Fertile Crescent"))$Openess_Score)$out
+
+```
+
+Just one record that is really different, let's check it:
+
+```{r}
+Filtered_Tidy_Big5 %>% filter (country=="Fertile Crescent" & Openess_Score==12)
+```
+
+And again - There is no obvious problem with this record, but we have enough records to just get rid of the whole record just to be sure.
+
+```{r}
+Filtered_Tidy_Big5 <- Filtered_Tidy_Big5 %>% filter (!(country=="Fertile Crescent" & Openess_Score==12))
+
+```
+
+**Checking the assumptions for ANOVA**
+
+1.  Normality - The samples are big enough (\>=25).
+
+2.  Homogeneity of variance:
+
+Extraversion:
+
+```{r warning=FALSE}
+leveneTest(Extraversion_Score ~ country, Filtered_Tidy_Big5)
+```
+
+Emotional Stability:
+
+```{r warning=FALSE}
+leveneTest(EmotionalStability_Score ~ country, Filtered_Tidy_Big5)
+```
+
+Agreeableness:
+
+```{r warning=FALSE}
+leveneTest(Agreeableness_Score ~ country, Filtered_Tidy_Big5)
+```
+
+Conscientiousness:
+
+```{r warning=FALSE}
+leveneTest(Conscientiousness_Score ~ country, Filtered_Tidy_Big5)
+```
+
+Openess:
+
+```{r warning=FALSE}
+leveneTest(Openess_Score ~ country, Filtered_Tidy_Big5)
+```
+
+As expected, they are all signifcant. We will save the standard deviations as usual:
+
+```{r}
+
+SD_Countries_Extraversion <- Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(std_dev = sd(Extraversion_Score)) # calculate standard deviation for all countries
+
+SD_Countries_Extraversion
+
+SD_Countries_EmotionalStability <- Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(std_dev = sd(EmotionalStability_Score)) # calculate standard deviation for all countries
+
+SD_Countries_EmotionalStability
+
+SD_Countries_Agreeableness <- Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(std_dev = sd(Agreeableness_Score)) # calculate standard deviation for all countries
+
+SD_Countries_Agreeableness
+
+SD_Countries_Conscientiousness <- Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(std_dev = sd(Conscientiousness_Score)) # calculate standard deviation for all countries
+
+SD_Countries_Conscientiousness
+
+SD_Countries_Openess <- Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(std_dev = sd(Openess_Score)) # calculate standard deviation for all countries
+
+SD_Countries_Openess
+```
+
+# Part 2 : Data Analysis
+
+### Choosing the proper analysis (Report + HTML)
+
+We gathered standard deviations for all of our dependent variables, now is the time to make a decision regarding ANOVA. First, we will organize all of the data so it is easy to observe.
+
+```{r}
+
+#ordering the std_dev + renaming
+
+SD_Countries_Agreeableness <- SD_Countries_Agreeableness %>% arrange(desc(std_dev))
+SD_Countries_Agreeableness <- SD_Countries_Agreeableness %>% rename(std_dev_Agr = std_dev)
+
+SD_Countries_Conscientiousness <- SD_Countries_Conscientiousness %>% arrange(desc(std_dev))
+SD_Countries_Conscientiousness <- SD_Countries_Conscientiousness %>% rename(std_dev_Con = std_dev)
+
+SD_Countries_EmotionalStability <- SD_Countries_EmotionalStability %>% arrange(desc(std_dev))
+SD_Countries_EmotionalStability <- SD_Countries_EmotionalStability %>% rename(std_dev_Emo = std_dev)
+
+SD_Countries_Extraversion <- SD_Countries_Extraversion %>% arrange(desc(std_dev))
+SD_Countries_Extraversion <- SD_Countries_Extraversion %>% rename(std_dev_Ext = std_dev)
+
+SD_Countries_Openess <- SD_Countries_Openess %>% arrange(desc(std_dev))
+SD_Countries_Openess <- SD_Countries_Openess %>% rename(std_dev_Ope = std_dev)
+
+SD_Countries_Mach <- SD_Countries_Mach %>% arrange(desc(std_dev))
+SD_Countries_Mach <- SD_Countries_Mach %>% rename(std_dev_Mach = std_dev)
+
+SD_Countries_Narcissism <- SD_Countries_Narcissism %>% arrange(desc(std_dev))
+SD_Countries_Narcissism <- SD_Countries_Narcissism %>% rename(std_dev_Nar = std_dev)
+
+SD_Countries_Psychopathy <- SD_Countries_Psychopathy %>% arrange(desc(std_dev))
+SD_Countries_Psychopathy <- SD_Countries_Psychopathy %>% rename(std_dev_Psy = std_dev)
+
+SD_Countries_RSE <- SD_Countries_RSE %>% arrange(desc(std_dev))
+SD_Countries_RSE <- SD_Countries_RSE %>% rename(std_dev_RSE = std_dev)
+
+```
+
+Presenting all of the tables data visually was less comfortable on this HTML file. We tried to use the gridExtra package to show all of the tables together, but the shown grid was still not satisfactory. We did not want to waste too much time on such a matter, so check the report for a convenient display and the conclusions.
+
+### Extraversion - Welch's ANOVA + Follow Ups 
+
+**Formal hypothesis:**
+
+As this is the first test we are doing, we will include the formal hypothesis for the Welch's ANOVA. We will not do it for all the tests because the other ANOVAs would be almost identical.
+
+-   [The null hypothesis]{style="text-decoration:underline"}: there is no difference between the study's countries in terms of Extraversion.
+
+-   [The alternative hypothesis]{style="text-decoration:underline"}: there is a difference between the study's countries in terms of Extraversion.
+
+          $H_0$ : $\huge\mu \scriptsize Israel \large = \huge\mu \scriptsize USA \large = \huge\mu \scriptsize UK \large = \huge\mu \scriptsize Australia \large = \huge\mu \scriptsize Fertle \large = \huge\mu \scriptsize UAE \large = \huge\mu \scriptsize China \large = \huge\mu \scriptsize India$
+
+          $H_1$ : Means are not all equal.
+
+**Details/assumptions:**
+
+-   We will test our hypothesis with an $\alpha$ = 0.00555.
+-   Based on our sample sizes, $\LARGE n\scriptsize Israel$ $,$ $\LARGE n\scriptsize USA$ $,$ $...$ $\large\geq 25$, we assume that the sampling distribution is normal based on the central limit theorem:
+
+          $\huge \bar{x}\scriptsize Israel$ $,$ $\huge \bar{x}\scriptsize USA$ $,$ $...$ $\sim \text{Normal}$
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(Extraversion_Mean = mean(Extraversion_Score))
+
+```
+
+All the results seem pretty similar descriptively - only the fertile crescent is prominent in its difference.
+
+**Formal test:**
+
+```{r}
+
+oneway.test(Extraversion_Score ~ country, data = Filtered_Tidy_Big5, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+We are not interested in pairwise comparisons that do not involve Israel. We will use 7 welch's t-test which do not assume homogeneity of variances (check report for more info) and then use Holm-Bonferroni correction to avoid alpha inflation.
+
+Note: We decided to not include the formal hypothesis for the purpose of being concise - the only difference is that every t-test includes 2 specific expectations.
+
+
+```{r}
+
+Test_list_Israel <- c("USA","United Kingdom","Australia","Fertile Crescent","United Arab Emirates","China","India")  #for testing against Israel
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # prepare P_Values list for holm-bonferroni
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Extraversion_Score,
+
+     (Filtered_Tidy_Big5 %>% filter(country==Country_against))$Extraversion_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction. We will implement it ourselves for our purposes, it would be easier.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+There are no differences between israel and the other countries in terms of Extraversion!
+
+Note: All the results are shown conveniently in the word document.
+
+### Emotional Stability - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(EmotionalStability_Mean = mean(EmotionalStability_Score))
+
+```
+
+The Arabs (especially fertile crescent) and UK seem to have lower emotional stability.
+
+**Formal test:**
+
+```{r}
+
+oneway.test(EmotionalStability_Score ~ country, data = Filtered_Tidy_Big5, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$EmotionalStability_Score,
+
+     (Filtered_Tidy_Big5 %>%  filter(country==Country_against))$EmotionalStability_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+There are significant differences between Israel and 4 countries. All of those countries have significantly lower Emotional stability than Israel. Now we have reason to calculate the hedge's g size effect. The Standard deviations are close enough to use this popular effect size measure.
+
+**Hedge's g size effects**
+
+
+```{r message=FALSE}
+library(effsize) #effect size package
+```
+
+
+```{r}
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$EmotionalStability_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="Fertile Crescent"))$EmotionalStability_Score,
+    hedges.correction=TRUE)
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$EmotionalStability_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="United Arab Emirates"))$EmotionalStability_Score,
+    hedges.correction=TRUE)
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$EmotionalStability_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="United Kingdom"))$EmotionalStability_Score,
+    hedges.correction=TRUE)
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$EmotionalStability_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="India"))$EmotionalStability_Score,
+    hedges.correction=TRUE)
+```
+
+### Agreeableness - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(Agreeableness_Mean = mean(Agreeableness_Score))
+
+```
+
+Israel and the Fertile Crescent have the lowest agreeableness. However, the differences do not seem drastic.
+
+**Formal test:**
+
+```{r}
+
+oneway.test(Agreeableness_Score ~ country, data = Filtered_Tidy_Big5, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Agreeableness_Score,
+
+     (Filtered_Tidy_Big5 %>%  filter(country==Country_against))$Agreeableness_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+There are significant differences between Israel and 3 countries. All of those countries have significantly higher agreeableness than Israel.
+
+Let's calculate the hedge's g size effect -  The Standard deviations are close enough.
+
+**Hedge's g size effects**
+
+```{r}
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Agreeableness_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="USA"))$Agreeableness_Score,
+    hedges.correction=TRUE)
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Agreeableness_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="United Arab Emirates"))$Agreeableness_Score,
+    hedges.correction=TRUE)
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Agreeableness_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="Australia"))$Agreeableness_Score,
+    hedges.correction=TRUE)
+
+
+```
+
+### Conscientiousness - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(Conscientiousness_Mean = mean(Conscientiousness_Score))
+
+```
+
+They are all pretty similar - UK seems to have pretty low conscientiousness compared to others.
+
+
+**Formal test:**
+
+```{r}
+
+oneway.test(Conscientiousness_Score ~ country, data = Filtered_Tidy_Big5, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Conscientiousness_Score,
+
+     (Filtered_Tidy_Big5 %>%  filter(country==Country_against))$Conscientiousness_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+There are significant differences between Israel and USA. Israel has lower conscientiousness than the USA.
+
+we will compute hedge's g. We will not refer to the standard deviations from now on - unless there are big differences.
+
+**Hedge's g size effects**
+
+```{r}
+
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Conscientiousness_Score,
+    (Filtered_Tidy_Big5 %>% filter(country=="USA"))$Conscientiousness_Score,
+    hedges.correction=TRUE)
+
+
+```
+
+
+### Openess to experience - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_Big5 %>% group_by(country) %>% summarize(Openess_Mean = mean(Openess_Score))
+
+```
+
+Israel is really sticking out here - we have the highest openess to experience.
+
+**Formal test:**
+
+```{r}
+
+oneway.test(Openess_Score ~ country, data = Filtered_Tidy_Big5, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Openess_Score,
+
+     (Filtered_Tidy_Big5 %>%  filter(country==Country_against))$Openess_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+Israel is different than all other countries. We are significantly higher in openess than all of them.
+
+Luckily for us, all of the standard deviations in this dependent variable are very similar - let's do the hedge's g.
+
+**Hedge's g size effects**
+
+```{r}
+
+for (Country_against in Test_list_Israel) 
+{
+  
+  print(Country_against)
+  
+print(
+  
+  
+cohen.d(
+    (Filtered_Tidy_Big5 %>% filter(country=="Israel"))$Openess_Score,
+    (Filtered_Tidy_Big5 %>% filter(country==Country_against))$Openess_Score,
+    hedges.correction=TRUE)
+)
+}
+
+```
+
+### Machiavellism - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_Mach %>% group_by(country) %>% summarize(Mach_Mean = mean(Mach_Score))
+
+```
+
+The Fertile Crescent shows a really high mean. USA is the lowest. Israel looks pretty average.
+
+**Formal test:**
+
+```{r}
+
+oneway.test(Mach_Score ~ country, data = Filtered_Tidy_Mach, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_Mach %>% filter(country=="Israel"))$Mach_Score,
+
+     (Filtered_Tidy_Mach %>%  filter(country==Country_against))$Mach_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+There are no significant differences!  
+Nevertheless, it is worth noting that Fertile Crescent was really close to it, and more liberal alpha corrections would have made it significant - the fertile crescent was 0.00005 short from being significant.
+
+### Narcissism - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_SD3 %>% group_by(country) %>% summarize(Narcissism_Mean = mean(Narcissism_Score))
+
+```
+
+The Arab World shows high values. Israel is the lowest but not by much.
+
+
+**Formal test:**
+
+```{r}
+
+oneway.test(Narcissism_Score ~ country, data = Filtered_Tidy_SD3, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_SD3 %>% filter(country=="Israel"))$Narcissism_Score,
+
+     (Filtered_Tidy_SD3 %>%  filter(country==Country_against))$Narcissism_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+Sadly there are no  significant differences again.  
+
+We think the reason for that is the relatively small samples for the arab world and israel and the DS3 questionnaire - we lost power because of that.
+
+### Psychopathy - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_SD3 %>% group_by(country) %>% summarize(Psychopathy_Mean = mean(Psychopathy_Score))
+
+```
+
+Interestingly, Israel has the lowest mean once again. In addition, the arab world shows the highest results again (like in narcissism). 
+
+**Formal test:**
+
+```{r}
+
+oneway.test(Psychopathy_Score ~ country, data = Filtered_Tidy_SD3, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_SD3 %>% filter(country=="Israel"))$Psychopathy_Score,
+
+     (Filtered_Tidy_SD3 %>%  filter(country==Country_against))$Psychopathy_Score,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+Sadly there are no  significant differences again.  
+
+Like in previous analysis, we think we suffer from lower power because of the small samples. There seems to be a pattern with the arab countries and the dark triad that might be worth of further study.
+
+### Self Esteem - Welch's ANOVA + Follow Ups
+
+**Descriptive:**
+
+We will start with showing descriptive data:
+
+```{r}
+
+Filtered_Tidy_RSE %>% group_by(country) %>% summarize(RSE_Mean = mean(RSE_SCORE))
+
+```
+
+The Arab world once again is on top. UK's results are notable low.
+
+**Formal test:**
+
+```{r}
+
+oneway.test(RSE_SCORE ~ country, data = Filtered_Tidy_RSE, var.equal = FALSE) # Welch's ANOVA
+
+```
+
+We rejected the null hypothesis. Now we need to figure out where the differences come from. 
+
+**Follow-Up Welch's t-tests**
+
+
+```{r}
+
+P_Values_Tibble <- tibble(Country = Test_list_Israel,  P_Value = numeric(7)) # RESET THE TIBBLE - prepare P_Values list for holm-bonferroni
+
+
+for (Country_against in Test_list_Israel) 
+{
+      t_test_result <- t.test(
+  
+     (Filtered_Tidy_RSE %>% filter(country=="Israel"))$RSE_SCORE,
+
+     (Filtered_Tidy_RSE %>%  filter(country==Country_against))$RSE_SCORE,
+
+     var.equal = FALSE)
+      
+      
+      P_Values_Tibble$P_Value[P_Values_Tibble$Country==Country_against] <- t_test_result$p.value
+      
+      
+}
+
+```
+
+We got the p-values. Now we will conduct the Holm-Bonferroni correction again.
+
+```{r}
+
+P_Values_Tibble <- P_Values_Tibble %>% arrange(P_Value) #sort P_values
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Adjusted_Alpha = 0.00555555/ (8- row_number()))
+
+#Calculate new Alphas, note that our initial Alpha is already smaller than the standard 0.05 because of the benferonni correction we have done before
+
+P_Values_Tibble <- P_Values_Tibble %>% mutate(Is_Significant = P_Value < Adjusted_Alpha)  # test significance
+
+print(P_Values_Tibble) 
+
+```
+
+We have 2 significant p-values with the west - we will use our effect size measure.
+
+**Hedge's g size effects**
+
+```{r}
+
+cohen.d(
+    (Filtered_Tidy_RSE %>% filter(country=="Israel"))$RSE_SCORE,
+    (Filtered_Tidy_RSE %>% filter(country=="United Kingdom"))$RSE_SCORE,
+    hedges.correction=TRUE)
+
+cohen.d(
+    (Filtered_Tidy_RSE %>% filter(country=="Israel"))$RSE_SCORE,
+    (Filtered_Tidy_RSE %>% filter(country=="Australia"))$RSE_SCORE,
+    hedges.correction=TRUE)
+
+```
+
+
+We finished the analysis. Conclusions will be presented in word document.
+
+
+### Bonus - The Big Five in Israel and its neighbouring countries
+
+The big 5 dataset has enough data to represent even countries with really small representations like our arab neighbours. We will want to visualize the differences between Israel, Lebanon, Syria, Jordan, Egypt in this section!
+
+```{r}
+Bonus_Filtered_Neighbours <- Tidy_Big5 %>% filter(country=="Israel" | 
+                                                    country=="JO" | country=="LB"|
+                                                    country=="SY" | country == "EG")
+
+Bonus_Filtered_Neighbours <- Bonus_Filtered_Neighbours %>% mutate(
+country = ifelse(country == "JO","Jordan",ifelse(country == "LB", "Lebanon", ifelse(country == "SY", "Syria", ifelse(country == "EG","Egypt", country)))))
+
+Bonus_Filtered_Neighbours %>% count(country)
+
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours , 
+     aes(x = Extraversion_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "Lebanon" = "red",
+                                  "Syria" = "green",
+                                  "Jordan" = "purple",
+                                  "Egypt" = "Yellow"))
+
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours,aes(x=country,y=Extraversion_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+```
+
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours , 
+     aes(x = EmotionalStability_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "Lebanon" = "red",
+                                  "Syria" = "green",
+                                  "Jordan" = "purple",
+                                  "Egypt" = "Yellow"))
+
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours,aes(x=country,y=EmotionalStability_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+```
+
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours, 
+     aes(x = Agreeableness_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "Lebanon" = "red",
+                                  "Syria" = "green",
+                                  "Jordan" = "purple",
+                                  "Egypt" = "Yellow"))
+
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours,aes(x=country,y=Agreeableness_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours , 
+     aes(x = Conscientiousness_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "Lebanon" = "red",
+                                  "Syria" = "green",
+                                  "Jordan" = "purple",
+                                  "Egypt" = "Yellow"))
+
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours,aes(x=country,y=Conscientiousness_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours , 
+     aes(x = Openess_Score , fill = country)) +
+     geom_density(alpha = 0.5) +
+     facet_wrap(~country) +
+     scale_fill_manual(values = c("Israel" = "blue", 
+                                  "Lebanon" = "red",
+                                  "Syria" = "green",
+                                  "Jordan" = "purple",
+                                  "Egypt" = "Yellow"))
+
+```
+
+```{r}
+ggplot(Bonus_Filtered_Neighbours,aes(x=country,y=Openess_Score,fill=country)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, vjust=0.5))
+```
+
+
+Notable observations:  
+1. Jordan shows the lowest extraversion boxplot, Israel and Lebanon the highest.  
+2. Egypt shows the lowest emotional stability boxplot, Israel the highest.
+3. Syria shows notably lower conscientiousness.  
+4. Egypt shows notably lower openess, Israel shows the highest.
